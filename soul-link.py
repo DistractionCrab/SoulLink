@@ -11,6 +11,7 @@ import tkinter.font as font
 PROGRAM = 'DarkSoulsIII.exe'
 PROGRAM = "DarkSoulsRemastered.exe"
 
+# Port for this mod: Blaze it nicely.
 PORT = 42069
 # Time out used for socket reading; Prevents locking operations.
 TIMEOUT = 0.01
@@ -24,7 +25,7 @@ class Server:
 		# General server socket to listen for connections.
 		self.__listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.__listen.settimeout(0.15)
-		self.__listen.bind(('localhost', 42069))
+		self.__listen.bind(('', 42069))
 		self.__listen.listen(1)
 
 		self.__active_trigger = active_info
@@ -77,7 +78,9 @@ class Server:
 
 class Client:
 	def __init__(self, address, port, active_info=None, logger=print):
+		logger("scanning memory")
 		self.__memory         = Memory()
+		logger("Found health values.")
 		self.__cur_health     = 1
 		self.__prev_dmg       = 1000
 		self.__active_trigger = active_info
@@ -209,79 +212,145 @@ class Window:
 		self.active_server = False
 		self.active_client = False
 
-		self.__window  = tk.Tk()
-		winfont        = font.Font(size=24)
-
-		# Create output textbox for information.
-		self.__infobox = tk.Text(width=40,height=30)
-		self.__infobox.grid(row=2, column=0)
+		self.__window = tk.Tk()
+		self.__font   = font.Font(size=24)
 
 		
+		self.__server_frame()
+		self.__client_frame()
 
+		self.__window.protocol("WM_DELETE_WINDOW", self.onclose)
+		
+	def onclose(self):
+		self.active_client = False
+		self.active_server = False
+		self.__window.destroy()
+
+
+	def __client_frame(self):
+		cframe = tk.Frame(self.__window)
+		cframe.pack(side=tk.RIGHT, anchor=tk.NE)
+
+		ipframe = tk.Frame(cframe)
+		ipframe.grid(row=2, column=0)
 		# Connection information:
 		# Entry for IP Address
-		self.__ipentry = tk.Entry(width=20, font=winfont)
-		self.__ipentry.grid(row=0, column=2)
+		self.__ipentry = tk.Entry(ipframe, width=10, font=self.__font)
+		self.__ipentry.grid(row=0, column=1)
 		self.__ipentry.insert(0, "localhost")
+
+		iplabel = tk.Label(ipframe, text="IP: ", font=self.__font)
+		iplabel.grid(row=0, column=0)
 
 		# Client connection button
 		self.__cn_button = tk.Button(
-			text="Connect", 
+			cframe,
+			text="Connect to IP",
+			width=12,
 			command=self.client_connect, 
-			font=winfont)
+			font=self.__font)
 		self.__cn_button.grid(row=0, column=0)
 
 		# Client disconnect button
 		self.__dn_button = tk.Button(
+			cframe,
 			text="Disconnect", 
+			width=12,
 			command=self.client_disconnect, 
-			font=winfont)
-		self.__dn_button.grid(row=1, column=2)
+			font=self.__font)
+		self.__dn_button.grid(row=1, column=0)
 
-		# Simple label to label the input box for IP address input.
-		self.__iplabel = tk.Label(text="Server IP: ", font=winfont)
-		self.__iplabel.grid(row=0, column=1)
+		iplabel = tk.Label(cframe, text="Client Output: ", font=self.__font)
+		iplabel.grid(row=3, column=0)
 
+		self.__infobox_client = tk.Text(cframe, width=30,height=15)
+		self.__infobox_client.grid(row=4, column=0)
+		
+
+	def __server_frame(self):
+		sframe = tk.Frame(self.__window)
+		sframe.pack(side=tk.LEFT, anchor=tk.NW)
 
 		# Button to start the server.
 		self.__sv_cn = tk.Button(
-			text="Host Server", 
+			sframe,
+			text="Host Server",
+			width=12,
 			command=self.handle_host, 
-			font=winfont)
-		self.__sv_cn.grid(row=1, column=0)
+			font=self.__font)
+		self.__sv_cn.grid(row=0, column=0)
 
 		# Button to kill current server.
 		self.__sv_dn = tk.Button(
-			text="Kill Server", 
-			command=self.end_host, font=winfont)
-		self.__sv_dn.grid(row=1, column=1)
+			sframe,
+			text="Kill Server",
+			width=12,
+			command=self.end_host, font=self.__font)
+		self.__sv_dn.grid(row=1, column=0)
 
-		
+		iplabel = tk.Label(sframe, text="Server Output: ", font=self.__font)
+		iplabel.grid(row=3, column=0)
+
+		# Just to make it look nice
+		emptylabel = tk.Label(sframe, text="", font=self.__font)
+		emptylabel.grid(row=2, column=0)
+
+		# Create output textbox for information.
+		self.__infobox_serv = tk.Text(sframe, width=30,height=15)
+		self.__infobox_serv.grid(row=4, column=0)
+
 
 	def run(self):
 		self.__window.mainloop()
 
 	# Simple Logger output
-	def logger(self, output):
-		self.__infobox.insert(tk.END, output + "\n")
+	def logger_client(self, output):
+		self.__infobox_client.insert(tk.END, output + "\n")
+
+	def logger_server(self, output):
+		self.__infobox_serv.insert(tk.END, output + "\n")
 
 	# Called when client is disconnected by GUI.
 	def client_disconnect(self):
 		self.active_client = False
 		self.__cn_button['state'] = 'normal'
 
+
+	def __set_active_client(self, act):
+		self.active_client = act
+		if act:
+			self.__cn_button['state'] = 'disabled'
+		else:
+			self.__cn_button['state'] = 'normal'
+
 	# Handles creating a client thread.
 	def client_connect(self):
 		if self.active_client:
-			self.logger("Client is already active.")
+			self.logger_client("Client is already active.")
 		else:
+			def client_thread():
+				ip = self.__ipentry.get()
+				self.active_client = True
+				try:
+					client = Client(
+						ip, 
+						PORT, 
+						active_info=self, 
+						logger=self.logger_client)
+				except Exception as ex:
+					self.logger_client(str(ex))
+					self.__set_active_client(False)
+
+				self.run_loop(client, error=on_err)
+				self.active_client = False
+
+
 			def on_err():
 				self.__cn_button['state'] = 'normal'
 
-			ip = self.__ipentry.get()
-			self.active_client = True
-			client = Client(ip, 42069, active_info=self, logger=self.logger)
-			t  = thr.Thread(target=lambda: self.run_loop(client, error=on_err))
+			
+
+			t  = thr.Thread(target=lambda: client_thread())
 			t.start()
 			self.__cn_button['state'] = 'disabled'
 
@@ -291,7 +360,7 @@ class Window:
 			self.__sv_cn['state'] = 'normal'
 
 		self.active_server = True
-		server = Server(active_info=self, logger=self.logger)
+		server = Server(active_info=self, logger=self.logger_server)
 		t = thr.Thread(target=lambda: self.run_loop(server, error=on_err))
 		t.start()
 		self.__sv_cn['state'] = 'disabled'
@@ -303,8 +372,8 @@ class Window:
 	def run_loop(self, obj, error=lambda: None):
 		try:
 			obj.run()
-		except ex:
-			logger(f"ERROR: {ex}" )
+		except Exception as ex:
+			self.logger_client(f"ERROR: {ex}" )
 			error()
 
 
