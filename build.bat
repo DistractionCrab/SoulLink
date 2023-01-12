@@ -1,1 +1,1 @@
-pyinstaller --onefile --windowed --icon=icon.ico soul-link.py
+python -m PyInstaller --onefile --windowed --icon=icon.ico soul-link.py
