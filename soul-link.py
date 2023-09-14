@@ -10,6 +10,7 @@ import tkinter.font as font
 # Program name to search for.
 PROGRAM = 'DarkSoulsIII.exe'
 PROGRAM = "DarkSoulsRemastered.exe"
+BASE_PATTERN = b"\x48\x8b\x05....\x48\x39\x48\x68\x0f\x94\xc0\xc3"
 
 # Port for this mod: Blaze it nicely.
 PORT = 42069
@@ -146,238 +147,32 @@ class Client:
 class Memory:
 	def __init__(self):
 		self.__game = pymem.Pymem(PROGRAM)
+		self.__base__addr = self.__init_base_addr()
 		self.__scan_memory()
 
-	def __scan_memory(self):
-		"""
-		This is currently inefficient due to single byte scanning. TODO make
-		faster.
-
-		Explanation of memory search:
-
-		Step 1: Scan memory for the follow pattern:
-			- 48 8b 05 xx xx xx xx 48 39 48 68 0f 94 c0 c3
-		step 2: The address, namely A, is our starting address that starts with
-			this pattern.
-		step 3: Use B = A + read(A + 3) + 7 as our base address to follow.
-		step 4: Let C = read(B) + 0x68
-		step 5: Let D = read(C) + 0x3e8
-		Step 6: Health location is at D, health value is read(D)
-		"""
-		game = self.__game
-		part1 = '488b05'
-		part2 = '483948680f94c0c3'
-		address = 0x140000000 - 0x4
-		found = False
-
-		def p1_check(address):
-			value = game.read_bytes(address, 3)
-			return part1 == value.hex()
-
-		def p2_check(address):
-			value = game.read_bytes(address + 7, 8)
-			return value.hex() == part2
-
-
-		while not found:
-			address += 4
-			c1 = p1_check(address)
-			
-			if c1:
-				c2 = p2_check(address)
-			
-			found = c1 and c2
-
-
-		self.__base_addr = address
-		self.__base_addr = address + game.read_int(address + 3) + 7
-
 	@property
-	def __health_address(self):
-		addr = self.__base_addr
-		temp = self.__game.read_int(addr) + 0x68
-		temp2 = self.__game.read_int(temp) + 0x3e8
-		return temp2
+	def hp(self):
+		addr = self.__game.read_int(self.__base_addr) + 0x68
+		addr = self.__game.read_int(addr) + 0x3e8
+		return 	self.__game.read_int(addr)
 
-	def get_health(self):
-		
+	@hp.setter
+	def hp(self, value):
+		addr = self.__game.read_int(self.__base_addr) + 0x68
+		addr = self.__game.read_int(addr) + 0x3e8
+		self.__game.write_int(addr, value)
+	
+
+	def __init_base_addr(self):
+		base = self.__game.pattern_scan_all(BASE_PATTERN)
+		return base + self.__game.read_int(base + 3) + 7
+
+	def get_health(self):		
 		return self.__game.read_int(self.__health_address)
 
 	def set_health(self, value):
 		self.__game.write_int(self.__health_address, value)
 
-class Window:
-	def __init__(self):
-		# public fields to be edited by threads
-		self.active_server = False
-		self.active_client = False
-
-		self.__window = tk.Tk()
-		self.__font   = font.Font(size=24)
-
-		
-		self.__server_frame()
-		self.__client_frame()
-
-		self.__window.protocol("WM_DELETE_WINDOW", self.onclose)
-		
-	def onclose(self):
-		self.active_client = False
-		self.active_server = False
-		self.__window.destroy()
-
-
-	def __client_frame(self):
-		cframe = tk.Frame(self.__window)
-		cframe.pack(side=tk.RIGHT, anchor=tk.NE)
-
-		ipframe = tk.Frame(cframe)
-		ipframe.grid(row=2, column=0)
-		# Connection information:
-		# Entry for IP Address
-		self.__ipentry = tk.Entry(ipframe, width=10, font=self.__font)
-		self.__ipentry.grid(row=0, column=1)
-		self.__ipentry.insert(0, "localhost")
-
-		iplabel = tk.Label(ipframe, text="IP: ", font=self.__font)
-		iplabel.grid(row=0, column=0)
-
-		# Client connection button
-		self.__cn_button = tk.Button(
-			cframe,
-			text="Connect to IP",
-			width=12,
-			command=self.client_connect, 
-			font=self.__font)
-		self.__cn_button.grid(row=0, column=0)
-
-		# Client disconnect button
-		self.__dn_button = tk.Button(
-			cframe,
-			text="Disconnect", 
-			width=12,
-			command=self.client_disconnect, 
-			font=self.__font)
-		self.__dn_button.grid(row=1, column=0)
-
-		iplabel = tk.Label(cframe, text="Client Output: ", font=self.__font)
-		iplabel.grid(row=3, column=0)
-
-		self.__infobox_client = tk.Text(cframe, width=30,height=15)
-		self.__infobox_client.grid(row=4, column=0)
-		
-
-	def __server_frame(self):
-		sframe = tk.Frame(self.__window)
-		sframe.pack(side=tk.LEFT, anchor=tk.NW)
-
-		# Button to start the server.
-		self.__sv_cn = tk.Button(
-			sframe,
-			text="Host Server",
-			width=12,
-			command=self.handle_host, 
-			font=self.__font)
-		self.__sv_cn.grid(row=0, column=0)
-
-		# Button to kill current server.
-		self.__sv_dn = tk.Button(
-			sframe,
-			text="Kill Server",
-			width=12,
-			command=self.end_host, font=self.__font)
-		self.__sv_dn.grid(row=1, column=0)
-
-		iplabel = tk.Label(sframe, text="Server Output: ", font=self.__font)
-		iplabel.grid(row=3, column=0)
-
-		# Just to make it look nice
-		emptylabel = tk.Label(sframe, text="", font=self.__font)
-		emptylabel.grid(row=2, column=0)
-
-		# Create output textbox for information.
-		self.__infobox_serv = tk.Text(sframe, width=30,height=15)
-		self.__infobox_serv.grid(row=4, column=0)
-
-
-	def run(self):
-		self.__window.mainloop()
-
-	# Simple Logger output
-	def logger_client(self, output):
-		self.__infobox_client.insert(tk.END, output + "\n")
-
-	def logger_server(self, output):
-		self.__infobox_serv.insert(tk.END, output + "\n")
-
-	# Called when client is disconnected by GUI.
-	def client_disconnect(self):
-		self.active_client = False
-		self.__cn_button['state'] = 'normal'
-
-
-	def __set_active_client(self, act):
-		self.active_client = act
-		if act:
-			self.__cn_button['state'] = 'disabled'
-		else:
-			self.__cn_button['state'] = 'normal'
-
-	# Handles creating a client thread.
-	def client_connect(self):
-		if self.active_client:
-			self.logger_client("Client is already active.")
-		else:
-			def client_thread():
-				ip = self.__ipentry.get()
-				self.active_client = True
-				try:
-					client = Client(
-						ip, 
-						PORT, 
-						active_info=self, 
-						logger=self.logger_client)
-				except Exception as ex:
-					self.logger_client(str(ex))
-					self.__set_active_client(False)
-
-				self.run_loop(client, error=on_err)
-				self.active_client = False
-
-
-			def on_err():
-				self.__cn_button['state'] = 'normal'
-
-			
-
-			t  = thr.Thread(target=lambda: client_thread())
-			t.start()
-			self.__cn_button['state'] = 'disabled'
-
-	# Called when the start server button is pressed.
-	def handle_host(self):
-		def on_err():
-			self.__sv_cn['state'] = 'normal'
-
-		self.active_server = True
-		server = Server(active_info=self, logger=self.logger_server)
-		t = thr.Thread(target=lambda: self.run_loop(server, error=on_err))
-		t.start()
-		self.__sv_cn['state'] = 'disabled'
-
-	def end_host(self):
-		self.active_server = False
-		self.__sv_cn['state'] = 'normal'
-
-	def run_loop(self, obj, error=lambda: None):
-		try:
-			obj.run()
-		except Exception as ex:
-			self.logger_client(f"ERROR: {ex}" )
-			error()
-
-
-		
 
 
 if __name__ == '__main__':
